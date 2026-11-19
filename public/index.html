@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Volume Momentum Scanner</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080d18;color:#e8edf7;font-family:Arial,sans-serif}
+header{padding:20px;background:#101a2b;border-bottom:1px solid #26344b}
+h1{margin:0;font-size:22px}
+.sub{color:#91a0b8;font-size:12px;margin-top:7px}
+main{padding:16px;max-width:1200px;margin:auto}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.stat,.panel{background:#111b2c;border:1px solid #26344b;border-radius:12px;padding:15px}
+.stat small{color:#91a0b8}
+.stat strong{display:block;font-size:22px;margin-top:8px}
+.status{color:#42d392}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+button{background:#2563eb;color:white;border:0;padding:10px 16px;border-radius:8px;font-weight:bold}
+#signals{display:grid;gap:12px}
+.signal{background:#111b2c;border:1px solid #26344b;border-radius:12px;padding:16px}
+.signal-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.coin{font-size:18px;font-weight:bold;overflow-wrap:anywhere}
+.direction{font-weight:bold;padding:6px 12px;border-radius:6px}
+.buy{background:#123e31;color:#42d392}
+.sell{background:#481d2a;color:#ff7188}
+.details{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+.detail small{display:block;color:#91a0b8;font-size:11px;margin-bottom:5px}
+.detail strong{font-size:14px;overflow-wrap:anywhere}
+.empty{text-align:center;padding:45px 15px;color:#91a0b8}
+#error{color:#ff7188;font-size:12px;margin-top:10px}
+footer{text-align:center;color:#65748c;padding:25px;font-size:11px}
+@media(max-width:600px){
+.stats{grid-template-columns:repeat(2,1fr)}
+.details{grid-template-columns:repeat(2,1fr)}
+h1{font-size:19px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>Volume Momentum Scanner</h1>
+<div class="sub">CoinDCX Futures · 5M Entry · 15M / 1H Confirmation</div>
+</header>
+
+<main>
+<div class="stats">
+<div class="stat"><small>Scanner Status</small><strong id="status" class="status">CONNECTING</strong></div>
+<div class="stat"><small>Pairs Scanned</small><strong id="scanned">--</strong></div>
+<div class="stat"><small>Trade-Ready Signals</small><strong id="count">0</strong></div>
+</div>
+
+<div class="toolbar">
+<div>
+<strong>Level 1 Trade Signals</strong>
+<div class="sub" id="updated">Waiting for live data...</div>
+</div>
+<button onclick="refreshData()">Refresh Now</button>
+</div>
+
+<div id="signals">
+<div class="panel empty">Scanner se live data ka intezar hai...</div>
+</div>
+<div id="error"></div>
+</main>
+
+<footer>Signals are risk-filtered, not guaranteed. Always verify before trading.</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function price(value){
+ if(value===undefined || value===null || !Number.isFinite(Number(value))) return "--";
+ return Number(value).toPrecision(7);
+}
+
+function renderSignals(data){
+ const list = Array.isArray(data) ? data : (data.signals || []);
+ $("count").textContent = list.length;
+
+ if(!list.length){
+  $("signals").innerHTML = '<div class="panel empty"><h2>NO TRADE</h2><p>Abhi koi setup saari mandatory conditions pass nahi kar raha.</p></div>';
+  return;
+ }
+
+ $("signals").innerHTML = list.map(s=>{
+  const side = String(s.direction || s.signal || "").toUpperCase();
+  const isBuy = side.includes("BUY") || side.includes("LONG");
+  const direction = isBuy ? "BUY" : "SELL";
+  return `
+  <div class="signal">
+   <div class="signal-top">
+    <div class="coin">${s.symbol || s.pair || "Unknown"}</div>
+    <div class="direction ${isBuy ? "buy" : "sell"}">${direction}</div>
+   </div>
+   <div class="details">
+    <div class="detail"><small>ENTRY</small><strong>${price(s.entry)}</strong></div>
+    <div class="detail"><small>STOP LOSS</small><strong>${price(s.stopLoss ?? s.sl)}</strong></div>
+    <div class="detail"><small>TARGET</small><strong>${price(s.target)}</strong></div>
+    <div class="detail"><small>15M TREND</small><strong>${s.trend15m || "--"}</strong></div>
+    <div class="detail"><small>1H TREND</small><strong>${s.trend1h || "--"}</strong></div>
+    <div class="detail"><small>VOLUME RATIO</small><strong>${s.volumeRatio ?? "--"}</strong></div>
+    <div class="detail"><small>VOLUME MA RISE</small><strong>${s.volumeMaRise ?? "--"}</strong></div>
+    <div class="detail"><small>SPREAD</small><strong>${s.spread ?? "--"}</strong></div>
+    <div class="detail"><small>LIQUIDITY CHECK</small><strong>${s.liquidityPass === false ? "FAILED" : "PASSED"}</strong></div>
+   </div>
+  </div>`;
+ }).join("");
+}
+
+async function refreshData(){
+ try{
+  $("error").textContent = "";
+  const [statusRes, signalsRes] = await Promise.all([
+   fetch("/api/status"),
+   fetch("/api/signals")
+  ]);
+
+  if(!statusRes.ok || !signalsRes.ok) throw new Error("API response error");
+
+  const status = await statusRes.json();
+  const signals = await signalsRes.json();
+
+  $("status").textContent = status.status || (status.running ? "RUNNING" : "ONLINE");
+  $("scanned").textContent = status.scanned ?? status.totalPairs ?? "--";
+  $("updated").textContent = "Last updated: " + new Date().toLocaleTimeString();
+
+  renderSignals(signals);
+ }catch(e){
+  $("status").textContent = "CONNECTING";
+  $("error").textContent = "Live API connection nahi ho pa raha. Server response check ho raha hai.";
+ }
+}
+
+refreshData();
+setInterval(refreshData, 10000);
+</script>
+</body>
+</html>
